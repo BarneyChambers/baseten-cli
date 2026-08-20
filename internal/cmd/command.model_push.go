@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/basetenlabs/baseten-cli/cmd"
 	"github.com/basetenlabs/baseten-cli/internal/deploymentpatch"
+	"github.com/basetenlabs/baseten-go/client"
 	"github.com/basetenlabs/baseten-go/client/managementapi"
 	"github.com/basetenlabs/baseten-go/client/modelarchive"
 	"gopkg.in/yaml.v3"
@@ -53,7 +54,7 @@ func commandModelPush(ctx *CommandContext, flags *cmd.ModelPushFlags) error {
 		return cmd.NewErrUsagef("--watch-hot-reload and --watch-no-keepalive require --watch")
 	}
 
-	prepareReq, buildOpts, err := buildModelPushInputs(flags)
+	pushOpts, err := buildModelPushOptions(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -75,39 +76,40 @@ func commandModelPush(ctx *CommandContext, flags *cmd.ModelPushFlags) error {
 	if err != nil {
 		return err
 	}
-	if teamID != "" {
-		prepareReq.TeamId = &teamID
+
+	// The push routes by model ID when the model already exists and by name
+	// when it does not, so the name is resolved here rather than by the SDK.
+	modelName, _ := pushOpts.Config["model_name"].(string)
+	existingModelID, err := findModelIDByName(ctx, api.API(), modelName, teamID)
+	if err != nil {
+		return err
+	}
+	if existingModelID != "" {
+		if flags.DisableArchiveDownload {
+			return cmd.NewErrUsagef("--disable-archive-download is only valid when creating a new model")
+		}
+		pushOpts.ModelID = existingModelID
+	} else {
+		pushOpts.TeamID = teamID
+		pushOpts.DisableArchiveDownload = flags.DisableArchiveDownload
 	}
 
-	announceModelPush(ctx, *prepareReq.Name, prepareReq.Deployment.EnvironmentName)
+	announceModelPush(ctx, modelName, pushOpts.EnvironmentName)
 
-	prepareResp, existingModelID, err := prepareModelPushUpload(ctx, api.API(), prepareReq, flags)
+	result, err := api.PushModel(ctx, pushOpts)
 	if err != nil {
 		return err
 	}
 	if flags.DryRun {
-		ctx.LogLine("Dry run successful: no upload performed.")
+		// The archive is built and read on a dry run, so its size is known even
+		// though nothing was sent.
+		ctx.Logf("Dry run successful: built archive (%s), no upload performed.\n", formatBytes(result.ArchiveBytes))
 		if ctx.JSON {
 			ctx.OutputJSON(struct{}{})
 		}
 		return nil
 	}
-
-	// Model formats that are not built from an uploaded archive (for example,
-	// BIS-LLM) get no upload target back from prepare: prepare returns a null
-	// S3 key. In that case skip the S3 upload and go straight to the commit,
-	// which the server builds from the config alone.
-	if prepareResp.S3Key != nil {
-		if err := uploadModelPushArchive(ctx, buildOpts, prepareResp); err != nil {
-			return err
-		}
-	}
-
-	modelName := resolvedModelPushName(prepareReq)
-	created, err := commitModelPush(ctx, api.API(), existingModelID, teamID, modelName, prepareResp.S3Key, prepareReq.Deployment, flags.DisableArchiveDownload)
-	if err != nil {
-		return err
-	}
+	created := &managementapi.CreatedModelDeployment{Model: *result.Model, Deployment: *result.Deployment}
 
 	remote, err := ctx.authInfo.Remote()
 	if err != nil {
@@ -126,7 +128,7 @@ func commandModelPush(ctx *CommandContext, flags *cmd.ModelPushFlags) error {
 	// The summary lands before watch/tail/wait so its links are usable while the
 	// deployment is still building, rather than only once those have finished.
 	printModelPushSummary(printf, w, created, predictURL, logsURL,
-		prepareReq.Deployment.EnvironmentName, sshEnabledInConfig(prepareReq.Deployment.Config))
+		pushOpts.EnvironmentName, sshEnabledInConfig(pushOpts.Config))
 
 	switch {
 	case flags.Watch:
@@ -169,61 +171,54 @@ func commandModelPush(ctx *CommandContext, flags *cmd.ModelPushFlags) error {
 	return nil
 }
 
-// buildModelPushInputs assembles the two structs downstream calls consume:
-// the prepare request (whose Deployment field is the on-the-wire payload)
-// and the archive build options. The model name is set on prepareReq.Name
-// here; the prepare step will flip Name to ModelId after looking up an
-// existing model.
-func buildModelPushInputs(flags *cmd.ModelPushFlags) (*managementapi.PrepareModelUploadRequest, modelarchive.BuildModelArchiveOptions, error) {
-	prepareReq := &managementapi.PrepareModelUploadRequest{
-		DryRun: &flags.DryRun,
-	}
-	buildOpts := modelarchive.BuildModelArchiveOptions{
-		Dir: flags.Dir,
-		IgnoreFileProcessor: func(_ context.Context, opts modelarchive.IgnoreFileProcessorOptions) (modelarchive.IgnoreFileFunc, error) {
-			return deploymentpatch.CompileTrussIgnore(opts.Contents), nil
+// buildModelPushOptions assembles the push the SDK will run, everything except
+// the model routing (ID versus name), which needs a lookup the caller does.
+func buildModelPushOptions(ctx *CommandContext, flags *cmd.ModelPushFlags) (client.PushModelOptions, error) {
+	opts := client.PushModelOptions{
+		DryRun:          flags.DryRun,
+		DeploymentName:  flags.DeploymentName,
+		EnvironmentName: flags.Environment,
+		// --watch implies --develop: both push a development deployment.
+		IsDevelopment:           flags.Develop || flags.Watch,
+		OverrideEnvInstanceType: flags.OverrideEnvInstanceType,
+		Archive: modelarchive.BuildModelArchiveOptions{
+			Dir: flags.Dir,
+			IgnoreFileProcessor: func(_ context.Context, opts modelarchive.IgnoreFileProcessorOptions) (modelarchive.IgnoreFileFunc, error) {
+				return deploymentpatch.CompileTrussIgnore(opts.Contents), nil
+			},
+		},
+		ModelUploader: func(uploadCtx context.Context, upload client.ModelUpload) error {
+			return uploadModelPushArchive(ctx, uploadCtx, upload)
 		},
 	}
 
-	if err := readModelConfigYAML(flags.Dir, &prepareReq.Deployment, &buildOpts); err != nil {
-		return nil, buildOpts, err
+	if err := readModelConfigYAML(flags.Dir, &opts); err != nil {
+		return opts, err
 	}
 
-	modelName, err := resolveModelPushName(flags, prepareReq.Deployment.Config)
+	modelName, err := resolveModelPushName(flags, opts.Config)
 	if err != nil {
-		return nil, buildOpts, err
+		return opts, err
 	}
-	prepareReq.Name = &modelName
+	opts.Config["model_name"] = modelName
 
-	if flags.OverrideName != "" {
-		prepareReq.Deployment.Config["model_name"] = flags.OverrideName
-	}
 	if flags.NoBuildCache {
-		applyModelPushNoBuildCache(prepareReq.Deployment.Config)
+		applyModelPushNoBuildCache(opts.Config)
 	}
-	if err := applyModelPushDeployTimeout(&prepareReq.Deployment, flags.DeployTimeout); err != nil {
-		return nil, buildOpts, err
+	if err := applyModelPushDeployTimeout(&opts, flags.DeployTimeout); err != nil {
+		return opts, err
 	}
-	if err := applyModelPushLabels(&prepareReq.Deployment, flags.Labels); err != nil {
-		return nil, buildOpts, err
+	if err := applyModelPushLabels(&opts, flags.Labels); err != nil {
+		return opts, err
 	}
-	applyModelPushEnvironmentFlags(&prepareReq.Deployment, flags)
-
-	// --watch implies --develop: both push a development deployment.
-	if flags.Develop || flags.Watch {
-		isDevelopment := true
-		prepareReq.Deployment.IsDevelopment = &isDevelopment
-	}
-
-	return prepareReq, buildOpts, nil
+	return opts, nil
 }
 
-// readModelConfigYAML loads config.yaml from dir and populates the fields
-// downstream callers will read from: deployment.Config (parsed map),
-// deployment.RawConfig (verbatim bytes), and the package-dir options on
-// buildOpts. A missing config.yaml is treated as a usage error since the
-// user is most likely pointing at the wrong directory.
-func readModelConfigYAML(dir string, deployment *managementapi.DeploymentArchivePayload, buildOpts *modelarchive.BuildModelArchiveOptions) error {
+// readModelConfigYAML loads config.yaml from dir into opts: the parsed Config,
+// the verbatim RawConfig, and the archive's package-dir options. A missing
+// config.yaml is treated as a usage error since the user is most likely
+// pointing at the wrong directory.
+func readModelConfigYAML(dir string, opts *client.PushModelOptions) error {
 	path := filepath.Join(dir, modelPushConfigFileName)
 	raw, err := os.ReadFile(path)
 	switch {
@@ -235,22 +230,21 @@ func readModelConfigYAML(dir string, deployment *managementapi.DeploymentArchive
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 
-	if err := yaml.Unmarshal(raw, &deployment.Config); err != nil {
+	if err := yaml.Unmarshal(raw, &opts.Config); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
-	if deployment.Config == nil {
-		deployment.Config = map[string]any{}
+	if opts.Config == nil {
+		opts.Config = map[string]any{}
 	}
 	// RawConfig is persisted verbatim and only surfaced back for display/download;
 	// the server never parses it into the build, so it keeps the original bytes
 	// (comments and all), including external_package_dirs.
-	rawStr := string(raw)
-	deployment.RawConfig = &rawStr
+	opts.RawConfig = string(raw)
 
-	if extDirs, ok := deployment.Config["external_package_dirs"].([]any); ok {
+	if extDirs, ok := opts.Config["external_package_dirs"].([]any); ok {
 		for _, v := range extDirs {
 			if s, ok := v.(string); ok {
-				buildOpts.ExternalPackageDirs = append(buildOpts.ExternalPackageDirs, s)
+				opts.Archive.ExternalPackageDirs = append(opts.Archive.ExternalPackageDirs, s)
 			}
 		}
 		// The external package contents are inlined into the archive under
@@ -260,17 +254,17 @@ func readModelConfigYAML(dir string, deployment *managementapi.DeploymentArchive
 		// exist in the extracted archive. ConfigYAMLOverride replaces the archived
 		// config.yaml (the file the build actually reads); RawConfig above keeps
 		// the original bytes since the server never builds from it.
-		delete(deployment.Config, "external_package_dirs")
-		cleared, err := yaml.Marshal(deployment.Config)
+		delete(opts.Config, "external_package_dirs")
+		cleared, err := yaml.Marshal(opts.Config)
 		if err != nil {
 			return fmt.Errorf("re-marshal %s after clearing external_package_dirs: %w", path, err)
 		}
-		buildOpts.ConfigYAMLOverride = cleared
+		opts.Archive.ConfigYAMLOverride = cleared
 	}
-	if bundled, ok := deployment.Config["bundled_packages_dir"].(string); ok && bundled != "" {
-		buildOpts.BundledPackagesDir = bundled
+	if bundled, ok := opts.Config["bundled_packages_dir"].(string); ok && bundled != "" {
+		opts.Archive.BundledPackagesDir = bundled
 	} else {
-		buildOpts.BundledPackagesDir = modelPushDefaultBundledPkgDir
+		opts.Archive.BundledPackagesDir = modelPushDefaultBundledPkgDir
 	}
 	return nil
 }
@@ -285,19 +279,6 @@ func resolveModelPushName(flags *cmd.ModelPushFlags, configMap map[string]any) (
 	return "", errors.New("model_name is required: set it in config.yaml or pass --override-name")
 }
 
-// resolvedModelPushName reads the model name after the prepare step has
-// possibly flipped Name -> ModelId. The name is always preserved in
-// Deployment.Config["model_name"] regardless of which routing field is set.
-func resolvedModelPushName(req *managementapi.PrepareModelUploadRequest) string {
-	if req.Name != nil {
-		return *req.Name
-	}
-	if v, ok := req.Deployment.Config["model_name"].(string); ok {
-		return v
-	}
-	return ""
-}
-
 func applyModelPushNoBuildCache(configMap map[string]any) {
 	build, _ := configMap["build"].(map[string]any)
 	if build == nil {
@@ -307,7 +288,7 @@ func applyModelPushNoBuildCache(configMap map[string]any) {
 	build["no_cache"] = true
 }
 
-func applyModelPushDeployTimeout(deployment *managementapi.DeploymentArchivePayload, raw string) error {
+func applyModelPushDeployTimeout(opts *client.PushModelOptions, raw string) error {
 	if raw == "" {
 		return nil
 	}
@@ -320,11 +301,11 @@ func applyModelPushDeployTimeout(deployment *managementapi.DeploymentArchivePayl
 		return fmt.Errorf("--deploy-timeout must be between %dm and %dm, got %dm",
 			modelPushDeployTimeoutMinMin, modelPushDeployTimeoutMaxMin, mins)
 	}
-	deployment.DeployTimeoutMinutes = &mins
+	opts.DeployTimeoutMinutes = mins
 	return nil
 }
 
-func applyModelPushLabels(deployment *managementapi.DeploymentArchivePayload, raw string) error {
+func applyModelPushLabels(opts *client.PushModelOptions, raw string) error {
 	if raw == "" {
 		return nil
 	}
@@ -336,108 +317,44 @@ func applyModelPushLabels(deployment *managementapi.DeploymentArchivePayload, ra
 	if !ok {
 		return errors.New("--labels: must be a JSON object")
 	}
-	deployment.Labels = &asMap
+	opts.Labels = asMap
 	return nil
 }
 
-func applyModelPushEnvironmentFlags(deployment *managementapi.DeploymentArchivePayload, flags *cmd.ModelPushFlags) {
-	if flags.DeploymentName != "" {
-		name := flags.DeploymentName
-		deployment.DeploymentName = &name
-	}
-	if flags.Environment != "" {
-		env := flags.Environment
-		deployment.EnvironmentName = &env
-	}
-	if deployment.EnvironmentName != nil {
-		// Server defaults to true; flag flips it off.
-		preserve := !flags.OverrideEnvInstanceType
-		deployment.PreserveEnvInstanceType = &preserve
-	}
-}
-
 // announceModelPush prints the pre-push narrative to stderr.
-func announceModelPush(ctx *CommandContext, modelName string, environment *string) {
-	if environment != nil {
-		ctx.Logf("Pushing model %q to environment %q...\n", modelName, *environment)
+func announceModelPush(ctx *CommandContext, modelName, environment string) {
+	if environment != "" {
+		ctx.Logf("Pushing model %q to environment %q...\n", modelName, environment)
 	} else {
 		ctx.Logf("Pushing model %q...\n", modelName)
 	}
 }
 
-// prepareModelPushUpload looks up the existing model (if any), finalizes the
-// new-vs-existing routing on prepareReq (Name vs ModelId), validates
-// route-specific flags, and calls PostPrepareModelUpload. Returns the
-// existing model ID (or "" for new) alongside the response so callers can
-// pick the right commit path.
-func prepareModelPushUpload(
-	ctx *CommandContext,
-	api *managementapi.Client,
-	prepareReq *managementapi.PrepareModelUploadRequest,
-	flags *cmd.ModelPushFlags,
-) (*managementapi.PrepareModelUploadResponse, string, error) {
-	modelName := *prepareReq.Name
-
-	teamScope := ""
-	if prepareReq.TeamId != nil {
-		teamScope = *prepareReq.TeamId
-	}
-	existingModelID, err := findModelIDByName(ctx, api, modelName, teamScope)
-	if err != nil {
-		return nil, "", err
-	}
-	if existingModelID != "" {
-		if flags.DisableArchiveDownload {
-			return nil, "", cmd.NewErrUsagef("--disable-archive-download is only valid when creating a new model")
-		}
-		prepareReq.Name = nil
-		prepareReq.TeamId = nil
-		prepareReq.ModelId = &existingModelID
-	}
-
-	resp, err := api.PostPrepareModelUpload(ctx, *prepareReq)
-	if err != nil {
-		return nil, "", fmt.Errorf("prepare upload: %w", err)
-	}
-	return resp, existingModelID, nil
-}
-
-func uploadModelPushArchive(
-	ctx *CommandContext,
-	buildOpts modelarchive.BuildModelArchiveOptions,
-	prepare *managementapi.PrepareModelUploadResponse,
-) error {
-	if prepare.Creds == nil || prepare.S3Bucket == nil || prepare.S3Key == nil || prepare.S3Region == nil {
-		return errors.New("prepare upload: server returned empty upload credentials")
-	}
-
-	archive, err := modelarchive.BuildModelArchive(ctx, buildOpts)
-	if err != nil {
-		return fmt.Errorf("build archive: %w", err)
-	}
-	defer archive.Close()
-	counted := &readCounter{r: archive}
-
+// uploadModelPushArchive uploads the model archive the push built. uploadCtx
+// carries the push's cancellation; ctx is the command context, used for output
+// and for the injectable S3 client.
+func uploadModelPushArchive(ctx *CommandContext, uploadCtx context.Context, upload client.ModelUpload) error {
 	awsCfg := aws.Config{
-		Region: *prepare.S3Region,
+		Region: upload.Region,
 		Credentials: awscreds.NewStaticCredentialsProvider(
-			prepare.Creds.AwsAccessKeyId,
-			prepare.Creds.AwsSecretAccessKey,
-			prepare.Creds.AwsSessionToken,
-		),
+			upload.AccessKeyID, upload.SecretAccessKey, upload.SessionToken),
 	}
 	tm := transfermanager.New(ctx.newS3APIClient(awsCfg))
 
-	ctx.LogLine("Uploading Truss...")
+	// Counted here rather than read off the push result, since the size is
+	// reported as soon as the upload lands rather than after the commit.
+	counted := &readCounter{r: upload.Body}
+
+	ctx.LogLine("Uploading model...")
 	start := time.Now()
-	if _, err := tm.UploadObject(ctx, &transfermanager.UploadObjectInput{
-		Bucket: prepare.S3Bucket,
-		Key:    prepare.S3Key,
+	if _, err := tm.UploadObject(uploadCtx, &transfermanager.UploadObjectInput{
+		Bucket: &upload.Bucket,
+		Key:    &upload.Key,
 		Body:   counted,
 	}); err != nil {
-		return fmt.Errorf("upload archive: %w", err)
+		return err
 	}
-	ctx.Logf("Uploaded Truss (%s) in %s\n",
+	ctx.Logf("Uploaded model (%s) in %s\n",
 		formatBytes(counted.n), time.Since(start).Round(time.Second))
 	return nil
 }
@@ -454,39 +371,6 @@ func (c *readCounter) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
 	return n, err
-}
-
-func commitModelPush(
-	ctx context.Context,
-	api *managementapi.Client,
-	existingModelID, teamID, modelName string,
-	s3Key *string,
-	deployment managementapi.DeploymentArchivePayload,
-	disableArchiveDownload bool,
-) (*managementapi.CreatedModelDeployment, error) {
-	if existingModelID != "" {
-		src := managementapi.DeploymentArchiveSource{S3Key: s3Key, Deployment: deployment}
-		var union managementapi.CreateModelDeploymentRequest_Source
-		if err := union.FromDeploymentArchiveSource(src); err != nil {
-			return nil, err
-		}
-		return api.PostModelsDeployments(ctx, existingModelID, managementapi.CreateModelDeploymentRequest{Source: union})
-	}
-
-	src := managementapi.ModelArchiveSource{Name: modelName, S3Key: s3Key, Deployment: deployment}
-	if disableArchiveDownload {
-		t := true
-		src.DisableArchiveDownload = &t
-	}
-	var union managementapi.CreateModelRequest_Source
-	if err := union.FromModelArchiveSource(src); err != nil {
-		return nil, err
-	}
-	req := managementapi.CreateModelRequest{Source: union}
-	if teamID != "" {
-		return api.PostTeamsModels(ctx, teamID, req)
-	}
-	return api.PostModels(ctx, req)
 }
 
 const (
@@ -653,17 +537,15 @@ func printModelPushSummary(
 	created *managementapi.CreatedModelDeployment,
 	predictURL string,
 	logsURL string,
-	environment *string,
+	environment string,
 	sshEnabled bool,
 ) {
 	modelID, deploymentID := created.Model.Id, created.Deployment.Id
 
 	// Show the environment when the push targeted one, otherwise when the
 	// response associates the deployment with one.
-	envName := ""
-	if environment != nil {
-		envName = *environment
-	} else if created.Deployment.Environment != nil {
+	envName := environment
+	if envName == "" && created.Deployment.Environment != nil {
 		envName = *created.Deployment.Environment
 	}
 
@@ -688,9 +570,9 @@ func printModelPushSummary(
 		printf("  %-*s %s\n", labelWidth, r[0], r[1])
 	}
 
-	if environment != nil {
-		printf("\nYour Truss has been deployed into the %q environment. After it successfully deploys, "+
-			"it will become the next %q deployment of your model.\n", *environment, *environment)
+	if environment != "" {
+		printf("\nYour model has been deployed into the %q environment. After it successfully deploys, "+
+			"it will become the next %q deployment of your model.\n", environment, environment)
 	}
 
 	// Each group is an emoji header followed by aligned rows: the code-styled
