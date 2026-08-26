@@ -24,8 +24,7 @@ const (
 )
 
 // getOrganizationInfo fetches GET /v1/organizations/me raw. Swap for the
-// generated client method once baseten-go regenerates from the spec that
-// includes the endpoint (basetenlabs/baseten#27068).
+// generated client method once the endpoint is available in baseten-go.
 func getOrganizationInfo(ctx *CommandContext, api *managementapi.Client) (*cmd.OrgInfo, error) {
 	url := strings.TrimRight(api.BaseURL, "/") + "/v1/organizations/me"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
