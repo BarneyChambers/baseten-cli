@@ -91,6 +91,25 @@ var commandOrg = Command{
 			},
 		},
 		{
+			Name:        "aws-assume-role",
+			Summary:     "Show AWS AssumeRole trust-policy inputs",
+			Description: "Show the AWS AssumeRole trust-policy inputs for the organization: the Baseten role ARN to allow and the external ID to require via sts:ExternalId.",
+			Flags:       OrgAwsAssumeRoleFlags{},
+			Output: &CommandOutput[OrgAwsAssumeRoleInfo]{
+				TextDescription: "Field-per-line summary: the Baseten role ARN and the AWS external ID.",
+				Examples: []CommandExample{
+					{
+						Description: "Show the AWS AssumeRole trust-policy inputs.",
+						Command:     "baseten org aws-assume-role",
+					},
+				},
+				JQExample: CommandExample{
+					Description: "Print just the external ID.",
+					Command:     "baseten org aws-assume-role --jq '.external_id'",
+				},
+			},
+		},
+		{
 			Name:    "billing",
 			Summary: "View billing information",
 			Children: []Command{
@@ -132,6 +151,25 @@ var commandOrg = Command{
 							Command:     "baseten org billing usage --jq '.model_apis_usage.total'",
 						},
 					},
+				},
+			},
+		},
+		{
+			Name:        "oidc",
+			Summary:     "Show OIDC workload identity configuration",
+			Description: "Show the OIDC configuration for workload identity: the org and team IDs used in subject claims, the Baseten issuer, and the audience.",
+			Flags:       OrgOidcFlags{},
+			Output: &CommandOutput[OrgOidcInfo]{
+				TextDescription: "Field-per-line summary: org ID, teams, issuer, audience, workload types, and the subject claim format.",
+				Examples: []CommandExample{
+					{
+						Description: "Show the OIDC configuration.",
+						Command:     "baseten org oidc",
+					},
+				},
+				JQExample: CommandExample{
+					Description: "Print just the org ID.",
+					Command:     "baseten org oidc --jq '.org_id'",
 				},
 			},
 		},
@@ -355,6 +393,38 @@ type OrgTeamDescribeFlags struct {
 
 	TeamID   string `flag:"team-id" desc:"Team ID to describe." oneof:"team-ref"`
 	TeamName string `flag:"team-name" desc:"Team name to describe." oneof:"team-ref"`
+}
+
+// OrgAwsAssumeRoleFlags configures `baseten org aws-assume-role`.
+type OrgAwsAssumeRoleFlags struct {
+	CommandFlags
+}
+
+// OrgAwsAssumeRoleInfo is the output of `org aws-assume-role`.
+type OrgAwsAssumeRoleInfo struct {
+	RoleArn    string `json:"role_arn"`
+	ExternalID string `json:"external_id"`
+}
+
+// OrgOidcFlags configures `baseten org oidc`.
+type OrgOidcFlags struct {
+	CommandFlags
+}
+
+// OrgOidcTeam identifies a team for OIDC subject claims.
+type OrgOidcTeam struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// OrgOidcInfo is the output of `org oidc`.
+type OrgOidcInfo struct {
+	OrgID              string        `json:"org_id"`
+	Teams              []OrgOidcTeam `json:"teams"`
+	Issuer             string        `json:"issuer"`
+	Audience           string        `json:"audience"`
+	WorkloadTypes      []string      `json:"workload_types"`
+	SubjectClaimFormat string        `json:"subject_claim_format"`
 }
 
 type OrgUserListFlags struct {
