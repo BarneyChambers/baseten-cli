@@ -91,25 +91,6 @@ var commandOrg = Command{
 			},
 		},
 		{
-			Name:        "aws-assume-role",
-			Summary:     "Show AWS AssumeRole trust-policy inputs",
-			Description: "Show the AWS AssumeRole trust-policy inputs for the organization: the Baseten role ARN to allow and the external ID to require via sts:ExternalId.",
-			Flags:       OrgAwsAssumeRoleFlags{},
-			Output: &CommandOutput[OrgAwsAssumeRoleInfo]{
-				TextDescription: "Field-per-line summary: the Baseten role ARN and the AWS external ID.",
-				Examples: []CommandExample{
-					{
-						Description: "Show the AWS AssumeRole trust-policy inputs.",
-						Command:     "baseten org aws-assume-role",
-					},
-				},
-				JQExample: CommandExample{
-					Description: "Print just the external ID.",
-					Command:     "baseten org aws-assume-role --jq '.external_id'",
-				},
-			},
-		},
-		{
 			Name:    "billing",
 			Summary: "View billing information",
 			Children: []Command{
@@ -155,21 +136,21 @@ var commandOrg = Command{
 			},
 		},
 		{
-			Name:        "oidc",
-			Summary:     "Show OIDC workload identity configuration",
-			Description: "Show the OIDC configuration for workload identity: the org and team IDs used in subject claims, the Baseten issuer, and the audience.",
-			Flags:       OrgOidcFlags{},
-			Output: &CommandOutput[OrgOidcInfo]{
-				TextDescription: "Field-per-line summary: org ID, teams, issuer, audience, workload types, and the subject claim format.",
+			Name:        "describe",
+			Summary:     "Describe the organization",
+			Description: "Describe the caller's organization, including the OIDC workload-identity configuration and the AWS AssumeRole trust-policy inputs.",
+			Flags:       OrgDescribeFlags{},
+			Output: &CommandOutput[OrgInfo]{
+				TextDescription: "Field-per-line summary: org ID, teams, OIDC issuer, audience, workload types, subject claim format, and the AWS AssumeRole role ARN and external ID (or that the method is not enabled).",
 				Examples: []CommandExample{
 					{
-						Description: "Show the OIDC configuration.",
-						Command:     "baseten org oidc",
+						Description: "Describe the organization.",
+						Command:     "baseten org describe",
 					},
 				},
 				JQExample: CommandExample{
-					Description: "Print just the org ID.",
-					Command:     "baseten org oidc --jq '.org_id'",
+					Description: "Print just the AWS external ID.",
+					Command:     "baseten org describe --jq '.aws_external_id'",
 				},
 			},
 		},
@@ -395,36 +376,17 @@ type OrgTeamDescribeFlags struct {
 	TeamName string `flag:"team-name" desc:"Team name to describe." oneof:"team-ref"`
 }
 
-// OrgAwsAssumeRoleFlags configures `baseten org aws-assume-role`.
-type OrgAwsAssumeRoleFlags struct {
+// OrgDescribeFlags configures `baseten org describe`.
+type OrgDescribeFlags struct {
 	CommandFlags
 }
 
-// OrgAwsAssumeRoleInfo is the output of `org aws-assume-role`.
-type OrgAwsAssumeRoleInfo struct {
-	RoleArn    string `json:"role_arn"`
-	ExternalID string `json:"external_id"`
-}
-
-// OrgOidcFlags configures `baseten org oidc`.
-type OrgOidcFlags struct {
-	CommandFlags
-}
-
-// OrgOidcTeam identifies a team for OIDC subject claims.
-type OrgOidcTeam struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// OrgOidcInfo is the output of `org oidc`.
-type OrgOidcInfo struct {
-	OrgID              string        `json:"org_id"`
-	Teams              []OrgOidcTeam `json:"teams"`
-	Issuer             string        `json:"issuer"`
-	Audience           string        `json:"audience"`
-	WorkloadTypes      []string      `json:"workload_types"`
-	SubjectClaimFormat string        `json:"subject_claim_format"`
+// OrgInfo is the response of GET /v1/organizations/me. Both AWS fields are
+// null while AWS AssumeRole is not enabled for the organization.
+type OrgInfo struct {
+	OrgID                    string  `json:"org_id"`
+	AwsCustomerAccessRoleArn *string `json:"aws_customer_access_role_arn"`
+	AwsExternalID            *string `json:"aws_external_id"`
 }
 
 type OrgUserListFlags struct {
