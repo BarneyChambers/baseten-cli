@@ -14,7 +14,7 @@ func orgInfoFixture(roleArn, externalID any) map[string]any {
 
 func Test_Org_AwsAssumeRole_Text(t *testing.T) {
 	h := NewCommandHarness(t)
-	h.MockManagementAPI().SetRoute("GET", "/v1/organization", 200,
+	h.MockManagementAPI().SetRoute("GET", "/v1/organizations/me", 200,
 		orgInfoFixture(
 			"arn:aws:iam::337139236424:role/baseten-customer-access",
 			"baseten-2fdd8a01c4c34e6bb92a2b96fca29b70",
@@ -28,7 +28,7 @@ func Test_Org_AwsAssumeRole_Text(t *testing.T) {
 
 func Test_Org_AwsAssumeRole_JSON(t *testing.T) {
 	h := NewCommandHarness(t)
-	h.MockManagementAPI().SetRoute("GET", "/v1/organization", 200,
+	h.MockManagementAPI().SetRoute("GET", "/v1/organizations/me", 200,
 		orgInfoFixture(
 			"arn:aws:iam::337139236424:role/baseten-customer-access",
 			"baseten-2fdd8a01c4c34e6bb92a2b96fca29b70",
@@ -40,7 +40,7 @@ func Test_Org_AwsAssumeRole_JSON(t *testing.T) {
 
 func Test_Org_AwsAssumeRole_NotEnabled(t *testing.T) {
 	h := NewCommandHarness(t)
-	h.MockManagementAPI().SetRoute("GET", "/v1/organization", 200,
+	h.MockManagementAPI().SetRoute("GET", "/v1/organizations/me", 200,
 		orgInfoFixture(nil, nil))
 
 	err := h.Execute("org", "aws-assume-role")
@@ -49,7 +49,7 @@ func Test_Org_AwsAssumeRole_NotEnabled(t *testing.T) {
 
 func Test_Org_Oidc_Text(t *testing.T) {
 	h := NewCommandHarness(t)
-	h.MockManagementAPI().SetRoute("GET", "/v1/organization", 200,
+	h.MockManagementAPI().SetRoute("GET", "/v1/organizations/me", 200,
 		orgInfoFixture(nil, nil))
 	h.MockManagementAPI().SetRoute("GET", "/v1/teams", 200,
 		map[string]any{"teams": []any{
@@ -69,7 +69,7 @@ func Test_Org_Oidc_Text(t *testing.T) {
 
 func Test_Org_Oidc_JSON(t *testing.T) {
 	h := NewCommandHarness(t)
-	h.MockManagementAPI().SetRoute("GET", "/v1/organization", 200,
+	h.MockManagementAPI().SetRoute("GET", "/v1/organizations/me", 200,
 		orgInfoFixture(nil, nil))
 	h.MockManagementAPI().SetRoute("GET", "/v1/teams", 200,
 		map[string]any{"teams": []any{}})

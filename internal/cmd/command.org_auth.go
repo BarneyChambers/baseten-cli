@@ -23,7 +23,7 @@ const (
 		"deployment=<deployment_id>:environment=<environment>:type=<workload_type>"
 )
 
-// organizationInfo mirrors GET /v1/organization. Fetched raw and kept local to
+// organizationInfo mirrors GET /v1/organizations/me. Fetched raw and kept local to
 // this package until the endpoint lands in baseten-go's generated client.
 type organizationInfo struct {
 	OrgID string `json:"org_id"`
@@ -33,7 +33,7 @@ type organizationInfo struct {
 }
 
 func getOrganizationInfo(ctx *CommandContext, api *managementapi.Client) (*organizationInfo, error) {
-	url := strings.TrimRight(api.BaseURL, "/") + "/v1/organization"
+	url := strings.TrimRight(api.BaseURL, "/") + "/v1/organizations/me"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
