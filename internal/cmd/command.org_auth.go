@@ -87,12 +87,12 @@ func commandOrgDescribe(ctx *CommandContext, flags *cmd.OrgDescribeFlags) error 
 	ctx.Outputf("Audience:             %s\n", oidcAudience)
 	ctx.Outputf("Workload Types:       %s\n", oidcWorkloadTypes)
 	ctx.Outputf("Subject Claim Format: %s\n", oidcSubjectClaimFormat)
-	// The server nulls both AWS fields while AssumeRole is not enabled.
-	if info.AwsCustomerAccessRoleArn == nil || info.AwsExternalID == nil {
+	// The server nulls aws_assume_role while the method is not enabled.
+	if info.AwsAssumeRole == nil {
 		ctx.Outputf("AWS AssumeRole:       not enabled (contact Baseten support to enable it)\n")
 		return nil
 	}
-	ctx.Outputf("Baseten Role ARN:     %s\n", *info.AwsCustomerAccessRoleArn)
-	ctx.Outputf("AWS External ID:      %s\n", *info.AwsExternalID)
+	ctx.Outputf("Baseten Role ARN:     %s\n", info.AwsAssumeRole.BasetenRoleArn)
+	ctx.Outputf("AWS External ID:      %s\n", info.AwsAssumeRole.ExternalID)
 	return nil
 }

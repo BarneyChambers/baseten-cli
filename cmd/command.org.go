@@ -150,7 +150,7 @@ var commandOrg = Command{
 				},
 				JQExample: CommandExample{
 					Description: "Print just the AWS external ID.",
-					Command:     "baseten org describe --jq '.aws_external_id'",
+					Command:     "baseten org describe --jq '.aws_assume_role.external_id'",
 				},
 			},
 		},
@@ -381,12 +381,18 @@ type OrgDescribeFlags struct {
 	CommandFlags
 }
 
-// OrgInfo is the response of GET /v1/organizations/me. Both AWS fields are
-// null while AWS AssumeRole is not enabled for the organization.
+// OrgInfo is the response of GET /v1/organizations/me. AwsAssumeRole is null
+// while AWS AssumeRole is not enabled for the organization.
 type OrgInfo struct {
-	OrgID                    string  `json:"org_id"`
-	AwsCustomerAccessRoleArn *string `json:"aws_customer_access_role_arn"`
-	AwsExternalID            *string `json:"aws_external_id"`
+	OrgID         string            `json:"org_id"`
+	CreatedAt     string            `json:"created_at"`
+	AwsAssumeRole *OrgAwsAssumeRole `json:"aws_assume_role"`
+}
+
+// OrgAwsAssumeRole holds the AWS AssumeRole trust-policy inputs.
+type OrgAwsAssumeRole struct {
+	BasetenRoleArn string `json:"baseten_role_arn"`
+	ExternalID     string `json:"external_id"`
 }
 
 type OrgUserListFlags struct {
