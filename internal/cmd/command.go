@@ -538,6 +538,10 @@ func (v *friendlyTimeValue) Set(s string) error {
 		time.RFC3339,
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
+		// Minute precision, which is what the autoscaling schedule flags ask
+		// for: a schedule window has no use for seconds.
+		"2006-01-02T15:04",
+		"2006-01-02 15:04",
 		"2006-01-02",
 	} {
 		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
@@ -545,7 +549,7 @@ func (v *friendlyTimeValue) Set(s string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("invalid time %q: expected ISO 8601 (e.g. 2026-05-14, 2026-05-14T12:00:00, 2026-05-14T12:00:00Z)", s)
+	return fmt.Errorf("invalid time %q: expected ISO 8601 (e.g. 2026-05-14, 2026-05-14T12:00, 2026-05-14T12:00:00, 2026-05-14T12:00:00Z)", s)
 }
 
 // friendlyDurationValue implements pflag.Value for a time.Duration that also
