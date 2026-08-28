@@ -385,6 +385,7 @@ type OrgDescribeFlags struct {
 // while AWS AssumeRole is not enabled for the organization.
 type OrgInfo struct {
 	OrgID         string            `json:"org_id"`
+	Name          *string           `json:"name"`
 	CreatedAt     string            `json:"created_at"`
 	AwsAssumeRole *OrgAwsAssumeRole `json:"aws_assume_role"`
 }

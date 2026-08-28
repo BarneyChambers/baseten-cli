@@ -7,6 +7,7 @@ import (
 func orgInfoFixture(assumeRole any) map[string]any {
 	return map[string]any{
 		"org_id":          "abcd1234",
+		"name":            "my-org",
 		"created_at":      "2026-01-01T00:00:00Z",
 		"aws_assume_role": assumeRole,
 	}
@@ -37,6 +38,7 @@ func Test_Org_Describe_Text(t *testing.T) {
 	h.Require.NoError(h.Execute("org", "describe"))
 	out := h.Stdout.String()
 	h.Require.Contains(out, "Org ID:               abcd1234")
+	h.Require.Contains(out, "Name:                 my-org")
 	h.Require.Contains(out, "t1 (my-team)")
 	h.Require.Contains(out, "Issuer:               https://oidc.baseten.co")
 	h.Require.Contains(out, "Subject Claim Format: v=1:org=<org_id>")
