@@ -731,12 +731,32 @@ func commandTrainJobUpdate(ctx *CommandContext, flags *cmd.TrainJobUpdateFlags) 
 	if err != nil {
 		return err
 	}
+	// --priority 0 is a real request, so distinguish "given" from the zero value
+	// rather than inferring it from the value itself.
+	setPriority := ctx.Command.Flags().Changed("priority")
+	setAvailability := ctx.Command.Flags().Changed("availability-model")
+	if !setPriority && !setAvailability {
+		return cmd.NewErrUsagef("pass at least one of --priority or --availability-model")
+	}
+
 	ref, err := resolveTrainJob(ctx, cl.API(), flags.JobID)
 	if err != nil {
 		return err
 	}
-	resp, err := cl.API().PatchTrainingProjectsJobs(ctx, ref.ProjectID, ref.JobID,
-		managementapi.UpdateTrainingJobRequest{Priority: flags.Priority})
+
+	var req managementapi.UpdateTrainingJobRequest
+	var changed []string
+	if setPriority {
+		req.Priority = &flags.Priority
+		changed = append(changed, fmt.Sprintf("priority to %d", flags.Priority))
+	}
+	if setAvailability {
+		model := managementapi.V1AvailabilityModel(flags.AvailabilityModel)
+		req.AvailabilityModel = &model
+		changed = append(changed, fmt.Sprintf("availability model to %s", flags.AvailabilityModel))
+	}
+
+	resp, err := cl.API().PatchTrainingProjectsJobs(ctx, ref.ProjectID, ref.JobID, req)
 	if err != nil {
 		return fmt.Errorf("update training job %s: %w", flags.JobID, err)
 	}
@@ -745,7 +765,7 @@ func commandTrainJobUpdate(ctx *CommandContext, flags *cmd.TrainJobUpdateFlags) 
 		ctx.OutputJSON(resp)
 		return nil
 	}
-	ctx.Logf("Set training job %s priority to %d.\n", resp.TrainingJob.Id, flags.Priority)
+	ctx.Logf("Set training job %s %s.\n", resp.TrainingJob.Id, strings.Join(changed, " and "))
 	return nil
 }
 
