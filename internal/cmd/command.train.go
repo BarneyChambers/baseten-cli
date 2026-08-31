@@ -727,16 +727,20 @@ func commandTrainJobRecreate(ctx *CommandContext, flags *cmd.TrainJobRecreateFla
 }
 
 func commandTrainJobUpdate(ctx *CommandContext, flags *cmd.TrainJobUpdateFlags) error {
-	cl, err := ctx.NewManagementClient()
-	if err != nil {
-		return err
-	}
+	// Validate before building the client: a malformed invocation should report
+	// what is wrong with it rather than an auth failure hit on the way there.
+	//
 	// --priority 0 is a real request, so distinguish "given" from the zero value
 	// rather than inferring it from the value itself.
 	setPriority := ctx.Command.Flags().Changed("priority")
 	setAvailability := ctx.Command.Flags().Changed("availability-model")
 	if !setPriority && !setAvailability {
 		return cmd.NewErrUsagef("pass at least one of --priority or --availability-model")
+	}
+
+	cl, err := ctx.NewManagementClient()
+	if err != nil {
+		return err
 	}
 
 	ref, err := resolveTrainJob(ctx, cl.API(), flags.JobID)

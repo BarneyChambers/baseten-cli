@@ -284,6 +284,19 @@ func Test_Train_Job_Update_NoFieldsIsUsageError(t *testing.T) {
 	h.Require.Nil(m.FindCall("PATCH", trainJobPath))
 }
 
+func Test_Train_Job_Update_NoFieldsReportsUsageErrorBeforeClientSetup(t *testing.T) {
+	h := NewCommandHarness(t)
+	// A malformed remote makes building the management client fail outright. A
+	// malformed invocation should still report what is wrong with the invocation
+	// rather than the config error hit on the way there.
+	t.Setenv("BASETEN_REMOTE_URL", "://bogus")
+
+	err := h.Execute("train", "job", "update", "--job-id", "job-1")
+	h.Require.Error(err)
+	h.Require.Contains(err.Error(), "at least one of --priority or --availability-model")
+	h.Require.NotContains(err.Error(), "invalid remote URL")
+}
+
 func Test_Train_Job_Update_RejectsUnknownAvailabilityModel(t *testing.T) {
 	h := NewCommandHarness(t)
 	h.MockManagementAPI()
