@@ -16,6 +16,12 @@ const (
 	trussAuthRemoteURLEnv = "BASETEN_TRUSS_AUTH_REMOTE_URL"
 	trussAuthAPIKeyEnv    = "BASETEN_TRUSS_AUTH_API_KEY"
 
+	// trussInvokingCLIEnv tells truss to print follow-up hints in this CLI's
+	// vocabulary. Set on every delegated invocation, including those that
+	// do not forward auth (train init).
+	trussInvokingCLIEnv = "BASETEN_TRUSS_INVOKING_CLI"
+	trussInvokingCLI    = "baseten"
+
 	// trussVersionEnv and trussExecutableEnv default --truss-version and
 	// --truss-executable, so a chosen truss survives across invocations.
 	trussVersionEnv    = "BASETEN_TRUSS_VERSION"
@@ -103,9 +109,13 @@ func trussCommand(ctx *CommandContext, inv trussInvocation) (*exec.Cmd, error) {
 	}
 
 	// TRUSS_NO_UPDATE_CHECK suppresses truss's update check and its associated
-	// disk/network side effects.
+	// disk/network side effects. BASETEN_TRUSS_INVOKING_CLI swaps truss's
+	// follow-up hints to `baseten ...` commands; see basetenlabs/baseten-cli#64.
+	// Drop any inherited copy first: Go's env lookup uses the first match.
 	env := append(os.Environ(), "TRUSS_NO_UPDATE_CHECK=1")
 	env = append(env, inv.Env...)
+	env = envWithout(env, trussInvokingCLIEnv)
+	env = append(env, trussInvokingCLIEnv+"="+trussInvokingCLI)
 	if inv.ForwardAuth {
 		transport, remote, err := ctx.AuthTransport()
 		if err != nil {
@@ -178,4 +188,16 @@ func trussIntArg(args []string, name string, value int) []string {
 		return args
 	}
 	return append(args, "--"+name, strconv.Itoa(value))
+}
+
+// envWithout drops entries named name, so a later append is the only match.
+func envWithout(env []string, name string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }

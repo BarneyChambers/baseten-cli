@@ -92,9 +92,21 @@ func Test_Truss_ForwardsArgsAndAuth(t *testing.T) {
 	c := fake.only(t)
 	h.Require.Equal([]string{"uv", "tool", "run", "truss@latest", "push", "--publish", "--help"}, c.Args)
 	h.Require.Contains(c.Env, "TRUSS_NO_UPDATE_CHECK=1")
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 	// The harness authenticates with BASETEN_API_KEY against BASETEN_REMOTE_URL.
 	h.Require.Contains(c.Env, "BASETEN_TRUSS_AUTH_API_KEY=test-key")
 	h.Require.Contains(c.Env, "BASETEN_TRUSS_AUTH_REMOTE_URL=http://127.0.0.1:1")
+}
+
+func Test_Truss_InvokingCLIOverridesParentEnv(t *testing.T) {
+	h, fake := newTrussHarness(t)
+	h.T.Setenv("BASETEN_TRUSS_INVOKING_CLI", "truss")
+
+	h.Require.NoError(h.Execute("truss", "push"))
+
+	c := fake.only(t)
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
+	h.Require.NotContains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=truss")
 }
 
 func Test_Truss_ExtractsOwnFlagsAnywhere(t *testing.T) {
@@ -107,6 +119,7 @@ func Test_Truss_ExtractsOwnFlagsAnywhere(t *testing.T) {
 	// Our flags are consumed wherever they appear; everything else keeps its order.
 	h.Require.Equal([]string{"uv", "tool", "run", "truss@0.18.26", "push", "./model", "--publish"}, c.Args)
 	h.Require.NotContains(strings.Join(c.Env, " "), "BASETEN_TRUSS_AUTH_")
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 }
 
 func Test_Truss_ExtractsInlineFlagValue(t *testing.T) {

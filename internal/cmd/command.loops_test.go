@@ -1001,6 +1001,7 @@ func Test_Loops_Checkpoint_Deploy_ForwardsFlags(t *testing.T) {
 		"--dry-run",
 	}, c.Args)
 	h.Require.Contains(c.Env, "BASETEN_TRUSS_AUTH_API_KEY=test-key")
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 }
 
 func Test_Loops_Checkpoint_Deploy_CheckpointIDs(t *testing.T) {

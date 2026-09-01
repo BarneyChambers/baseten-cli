@@ -992,6 +992,7 @@ func Test_Train_Push_ForwardsFlags(t *testing.T) {
 		"--interactive", "on_failure",
 		"--interactive-timeout-minutes", "90",
 	}, fake.only(t).Args)
+	h.Require.Contains(fake.only(t).Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 }
 
 func Test_Train_Push_RejectsSubMinuteInteractiveTimeout(t *testing.T) {
@@ -1058,6 +1059,7 @@ func Test_Train_Init_ForwardsFlagsWithoutAuth(t *testing.T) {
 	}, c.Args)
 	// Scaffolding calls no API, so no credential is forwarded.
 	h.Require.NotContains(strings.Join(c.Env, " "), "BASETEN_TRUSS_AUTH_")
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 }
 
 func Test_Train_Init_ListExamples(t *testing.T) {
@@ -1101,4 +1103,5 @@ func Test_Train_WorkstationCreate_ForwardsFlags(t *testing.T) {
 		"--checkpoint-from-job", "job-1",
 	}, c.Args)
 	h.Require.Contains(c.Env, "BASETEN_TRUSS_AUTH_API_KEY=test-key")
+	h.Require.Contains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=baseten")
 }
