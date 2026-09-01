@@ -22,6 +22,10 @@ const (
 	trussInvokingCLIEnv = "BASETEN_TRUSS_INVOKING_CLI"
 	trussInvokingCLI    = "baseten"
 
+	// trussNoUpdateCheckEnv is forced on so delegated truss skips its update
+	// check and the disk/network work that comes with it.
+	trussNoUpdateCheckEnv = "TRUSS_NO_UPDATE_CHECK"
+
 	// trussVersionEnv and trussExecutableEnv default --truss-version and
 	// --truss-executable, so a chosen truss survives across invocations.
 	trussVersionEnv    = "BASETEN_TRUSS_VERSION"
@@ -111,11 +115,11 @@ func trussCommand(ctx *CommandContext, inv trussInvocation) (*exec.Cmd, error) {
 	// TRUSS_NO_UPDATE_CHECK suppresses truss's update check and its associated
 	// disk/network side effects. BASETEN_TRUSS_INVOKING_CLI swaps truss's
 	// follow-up hints to `baseten ...` commands; see basetenlabs/baseten-cli#64.
-	// Drop any inherited copy first: Go's env lookup uses the first match.
-	env := append(os.Environ(), "TRUSS_NO_UPDATE_CHECK=1")
-	env = append(env, inv.Env...)
+	// Drop inherited copies first: Go's env lookup uses the first match.
+	env := append(os.Environ(), inv.Env...)
+	env = envWithout(env, trussNoUpdateCheckEnv)
 	env = envWithout(env, trussInvokingCLIEnv)
-	env = append(env, trussInvokingCLIEnv+"="+trussInvokingCLI)
+	env = append(env, trussNoUpdateCheckEnv+"=1", trussInvokingCLIEnv+"="+trussInvokingCLI)
 	if inv.ForwardAuth {
 		transport, remote, err := ctx.AuthTransport()
 		if err != nil {

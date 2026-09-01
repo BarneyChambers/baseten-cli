@@ -109,6 +109,17 @@ func Test_Truss_InvokingCLIOverridesParentEnv(t *testing.T) {
 	h.Require.NotContains(c.Env, "BASETEN_TRUSS_INVOKING_CLI=truss")
 }
 
+func Test_Truss_NoUpdateCheckOverridesParentEnv(t *testing.T) {
+	h, fake := newTrussHarness(t)
+	h.T.Setenv("TRUSS_NO_UPDATE_CHECK", "0")
+
+	h.Require.NoError(h.Execute("truss", "push"))
+
+	c := fake.only(t)
+	h.Require.Contains(c.Env, "TRUSS_NO_UPDATE_CHECK=1")
+	h.Require.NotContains(c.Env, "TRUSS_NO_UPDATE_CHECK=0")
+}
+
 func Test_Truss_ExtractsOwnFlagsAnywhere(t *testing.T) {
 	h, fake := newTrussHarness(t)
 
